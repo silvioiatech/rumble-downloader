@@ -23,7 +23,7 @@ jobs:
       - name: Install yt-dlp + ffmpeg
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg python3-pip
+          sudo apt-get install -y ffmpeg python3-pip jq
           pip3 install -U yt-dlp
 
       - name: Download video
@@ -53,12 +53,15 @@ jobs:
       - name: Post callback to n8n
         env:
           CB: ${{ github.event.inputs.callback_url }}
+          ORIG: ${{ github.event.inputs.url }}
+          TAG: ${{ github.event.inputs.tag }}
         run: |
           curl -s -X POST "$CB" \
             -H 'Content-Type: application/json' \
             -d "$(jq -n \
                 --arg file_url '${{ steps.up.outputs.url }}' \
                 --arg file_name '${{ steps.up.outputs.name }}' \
-                --arg tag '${{ github.event.inputs.tag }}' \
+                --arg rumble_url "$ORIG" \
+                --arg tag "$TAG" \
                 --arg html_run "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-                '{status:"ready", file_url:$file_url, file_name:$file_name, tag:$tag, run_url:$html_run}')"
+                '{status:"ready", file_url:$file_url, file_name:$file_name, rumble_url:$rumble_url, tag:$tag, run_url:$html_run}')"
