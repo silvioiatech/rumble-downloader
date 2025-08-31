@@ -1,4 +1,4 @@
-name: Rumble Download
+name: Rumble Download (Callback)
 
 on:
   workflow_dispatch:
@@ -6,8 +6,11 @@ on:
       url:
         description: 'Rumble video URL'
         required: true
+      callback_url:
+        description: 'n8n callback URL'
+        required: true
       tag:
-        description: 'Correlation tag from n8n (optional)'
+        description: 'Correlation tag'
         required: false
         default: ''
 
@@ -15,8 +18,7 @@ jobs:
   dl:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install yt-dlp + ffmpeg
         run: |
@@ -31,26 +33,32 @@ jobs:
           TAG: ${{ github.event.inputs.tag }}
         run: |
           mkdir -p out
-          # Safe base name includes correlation tag
           BASE="${TAG:-rumble}"
           yt-dlp --no-part --merge-output-format mp4 -f "bv*+ba/best" \
             -o "out/${BASE}_%(title).200B [%(id)s].%(ext)s" \
             --restrict-filenames --write-info-json --write-thumbnail \
             "$URL"
-          echo "latest=$(ls -1t out/*.mp4 | head -n 1)" >> $GITHUB_OUTPUT
+          FILE=$(ls -1t out/*.mp4 | head -n 1)
+          echo "file=$FILE" >> $GITHUB_OUTPUT
 
-      - name: Upload artifact (video)
-        uses: actions/upload-artifact@v4
-        with:
-          name: video
-          path: ${{ steps.grab.outputs.latest }}
+      - name: Upload to transfer.sh
+        id: up
+        run: |
+          FILE="${{ steps.grab.outputs.file }}"
+          NAME="$(basename "$FILE")"
+          URL=$(curl --silent --upload-file "$FILE" "https://transfer.sh/$NAME")
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
 
-      - name: Upload meta (json/jpg if present)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: meta
-          path: |
-            out/*.info.json
-            out/*.jpg
-          if-no-files-found: ignore
+      - name: Post callback to n8n
+        env:
+          CB: ${{ github.event.inputs.callback_url }}
+        run: |
+          curl -s -X POST "$CB" \
+            -H 'Content-Type: application/json' \
+            -d "$(jq -n \
+                --arg file_url '${{ steps.up.outputs.url }}' \
+                --arg file_name '${{ steps.up.outputs.name }}' \
+                --arg tag '${{ github.event.inputs.tag }}' \
+                --arg html_run "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+                '{status:"ready", file_url:$file_url, file_name:$file_name, tag:$tag, run_url:$html_run}')"
