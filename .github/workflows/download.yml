@@ -1,0 +1,56 @@
+name: Rumble Download
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Rumble video URL'
+        required: true
+      tag:
+        description: 'Correlation tag from n8n (optional)'
+        required: false
+        default: ''
+
+jobs:
+  dl:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yt-dlp + ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg python3-pip
+          pip3 install -U yt-dlp
+
+      - name: Download video
+        id: grab
+        env:
+          URL: ${{ github.event.inputs.url }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          mkdir -p out
+          # Safe base name includes correlation tag
+          BASE="${TAG:-rumble}"
+          yt-dlp --no-part --merge-output-format mp4 -f "bv*+ba/best" \
+            -o "out/${BASE}_%(title).200B [%(id)s].%(ext)s" \
+            --restrict-filenames --write-info-json --write-thumbnail \
+            "$URL"
+          echo "latest=$(ls -1t out/*.mp4 | head -n 1)" >> $GITHUB_OUTPUT
+
+      - name: Upload artifact (video)
+        uses: actions/upload-artifact@v4
+        with:
+          name: video
+          path: ${{ steps.grab.outputs.latest }}
+
+      - name: Upload meta (json/jpg if present)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meta
+          path: |
+            out/*.info.json
+            out/*.jpg
+          if-no-files-found: ignore
